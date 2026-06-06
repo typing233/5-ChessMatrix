@@ -14,6 +14,7 @@ const screens = {
   auth: document.getElementById('auth-screen'),
   lobby: document.getElementById('lobby-screen'),
   profile: document.getElementById('profile-screen'),
+  replay: document.getElementById('replay-screen'),
   game: document.getElementById('game-screen'),
 };
 
@@ -686,55 +687,220 @@ document.getElementById('modal-lobby-btn').addEventListener('click', () => {
   showLobby();
 });
 
-// --- Replay ---
+// --- Replay Detail ---
+let replayBoard = null;
+let replayMoves = [];
+let replayIdx = 0;
+let replayAutoInterval = null;
+let replayGameData = null;
+
 async function viewReplay(gameId) {
   try {
     const res = await fetch(`/api/game/${gameId}`);
     const game = await res.json();
-    if (!game.moves) return showToast('无法加载对局');
+    if (!game) return showToast('无法加载对局');
 
-    const moves = Array.isArray(game.moves) ? game.moves : JSON.parse(game.moves);
-    if (moves.length === 0) return showToast('对局无走子记录');
+    replayGameData = game;
+    replayMoves = Array.isArray(game.moves) ? game.moves : [];
+    replayIdx = 0;
+    if (replayAutoInterval) { clearInterval(replayAutoInterval); replayAutoInterval = null; }
 
-    showScreen('game');
-    if (!board) board = new ChessBoard3D('chess-board');
+    showScreen('replay');
 
-    board.myColor = null;
-    board.setFlipped(false);
-    board.interactive = false;
-    board.setPosition('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+    // Initialize board
+    if (!replayBoard) {
+      replayBoard = new ChessBoard3D('replay-board');
+    }
+    replayBoard.myColor = null;
+    replayBoard.setFlipped(false);
+    replayBoard.interactive = false;
+    replayBoard.setPosition('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+    replayBoard.lastMove = null;
+    replayBoard.checkSquare = null;
+    replayBoard.render();
 
-    document.getElementById('opponent-name').textContent = game.black_username || 'Black';
-    document.getElementById('self-name').textContent = game.white_username || 'White';
-    document.getElementById('game-status').textContent = '对局回放';
-    document.getElementById('resign-btn').classList.add('hidden');
-    document.getElementById('draw-btn').classList.add('hidden');
-    document.getElementById('rematch-btn').classList.add('hidden');
-    document.getElementById('back-lobby-btn').classList.remove('hidden');
-
-    if (timer) { timer.destroy(); timer = null; }
-    document.getElementById('self-timer').textContent = '--:--';
-    document.getElementById('opponent-timer').textContent = '--:--';
-
-    let idx = 0;
-    const replayInterval = setInterval(() => {
-      if (idx >= moves.length) { clearInterval(replayInterval); return; }
-      const move = moves[idx];
-      board.setPosition(move.fen);
-      board.setLastMove(move.from, move.to);
-      board.render();
-      updateMoveList(moves.slice(0, idx + 1));
-      idx++;
-    }, 1000);
-
-    document.getElementById('back-lobby-btn').onclick = () => {
-      clearInterval(replayInterval);
-      currentGame = null;
-      showLobby();
+    // Populate game info
+    const reasons = {
+      checkmate: '将杀', resignation: '认输', disconnect: '断线',
+      stalemate: '逼和', threefold: '三次重复', fifty_move: '50步规则',
+      insufficient: '子力不足', draw_agreement: '协议和棋', timeout: '超时',
     };
+
+    let resultText = '';
+    if (game.result === 'white') resultText = '白方胜';
+    else if (game.result === 'black') resultText = '黑方胜';
+    else if (game.result === 'draw') resultText = '和棋';
+
+    const whiteEloDelta = game.white_elo_after ? game.white_elo_after - game.white_elo_before : 0;
+    const blackEloDelta = game.black_elo_after ? game.black_elo_after - game.black_elo_before : 0;
+    const whiteEloStr = `${game.white_elo_before} → ${game.white_elo_after || game.white_elo_before} (${whiteEloDelta >= 0 ? '+' : ''}${whiteEloDelta})`;
+    const blackEloStr = `${game.black_elo_before} → ${game.black_elo_after || game.black_elo_before} (${blackEloDelta >= 0 ? '+' : ''}${blackEloDelta})`;
+
+    document.getElementById('replay-white').textContent = game.white_username || 'White';
+    document.getElementById('replay-black').textContent = game.black_username || 'Black';
+    document.getElementById('replay-result').textContent = resultText;
+    document.getElementById('replay-reason').textContent = reasons[game.result_reason] || game.result_reason || '--';
+    document.getElementById('replay-type').textContent = game.is_ranked ? '排位赛' : '友谊赛';
+    document.getElementById('replay-white-elo').textContent = whiteEloStr;
+    document.getElementById('replay-black-elo').textContent = blackEloStr;
+    document.getElementById('replay-start-time').textContent = game.started_at ? formatDateTime(game.started_at) : '--';
+    document.getElementById('replay-end-time').textContent = game.ended_at ? formatDateTime(game.ended_at) : '--';
+    document.getElementById('replay-total-moves').textContent = `${Math.ceil(replayMoves.length / 2)} 回合 (${replayMoves.length} 步)`;
+
+    // Build move list with time info
+    buildReplayMoveList();
+    updateReplayPosition();
+    updateReplayTimeInfo();
+
   } catch (e) {
     showToast('加载失败');
   }
+}
+
+function buildReplayMoveList() {
+  const el = document.getElementById('replay-move-list');
+  let html = '';
+  for (let i = 0; i < replayMoves.length; i += 2) {
+    const moveNum = Math.floor(i / 2) + 1;
+    const wm = replayMoves[i];
+    const bm = replayMoves[i + 1];
+    const wTime = wm.elapsed ? formatMoveTime(wm.elapsed) : '';
+    const bTime = bm && bm.elapsed ? formatMoveTime(bm.elapsed) : '';
+    html += `<div class="move-pair">
+      <span class="move-number">${moveNum}.</span>
+      <span class="move replay-move" data-idx="${i}">${wm.san}${wTime ? ' <small class="move-time">' + wTime + '</small>' : ''}</span>
+      ${bm ? `<span class="move replay-move" data-idx="${i + 1}">${bm.san}${bTime ? ' <small class="move-time">' + bTime + '</small>' : ''}</span>` : ''}
+    </div>`;
+  }
+  el.innerHTML = html;
+
+  el.querySelectorAll('.replay-move').forEach(moveEl => {
+    moveEl.addEventListener('click', () => {
+      const idx = parseInt(moveEl.dataset.idx);
+      replayIdx = idx + 1;
+      updateReplayPosition();
+      updateReplayTimeInfo();
+    });
+  });
+}
+
+function updateReplayPosition() {
+  if (replayIdx === 0) {
+    replayBoard.setPosition('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+    replayBoard.lastMove = null;
+    replayBoard.checkSquare = null;
+  } else {
+    const move = replayMoves[replayIdx - 1];
+    replayBoard.setPosition(move.fen);
+    replayBoard.setLastMove(move.from, move.to);
+  }
+  replayBoard.render();
+
+  document.getElementById('replay-move-indicator').textContent = `${replayIdx} / ${replayMoves.length}`;
+
+  // Highlight current move in the list
+  document.querySelectorAll('#replay-move-list .replay-move').forEach(el => {
+    el.classList.toggle('latest', parseInt(el.dataset.idx) === replayIdx - 1);
+  });
+}
+
+function updateReplayTimeInfo() {
+  let whiteTimeLeft = '--';
+  let blackTimeLeft = '--';
+  let moveTimeHtml = '';
+
+  if (replayIdx > 0) {
+    const move = replayMoves[replayIdx - 1];
+    if (move.whiteTime !== undefined) whiteTimeLeft = formatClockTime(move.whiteTime);
+    if (move.blackTime !== undefined) blackTimeLeft = formatClockTime(move.blackTime);
+    if (move.elapsed !== undefined) {
+      const side = (replayIdx - 1) % 2 === 0 ? '白方' : '黑方';
+      moveTimeHtml = `<span class="current-move-time">${side}本步用时: <strong>${formatMoveTime(move.elapsed)}</strong></span>`;
+    }
+  }
+
+  document.getElementById('replay-white-time-left').textContent = whiteTimeLeft;
+  document.getElementById('replay-black-time-left').textContent = blackTimeLeft;
+  document.getElementById('replay-move-time').innerHTML = moveTimeHtml;
+}
+
+function replayGoFirst() {
+  replayIdx = 0;
+  updateReplayPosition();
+  updateReplayTimeInfo();
+}
+
+function replayGoPrev() {
+  if (replayIdx > 0) {
+    replayIdx--;
+    updateReplayPosition();
+    updateReplayTimeInfo();
+  }
+}
+
+function replayGoNext() {
+  if (replayIdx < replayMoves.length) {
+    replayIdx++;
+    updateReplayPosition();
+    updateReplayTimeInfo();
+  }
+}
+
+function replayGoLast() {
+  replayIdx = replayMoves.length;
+  updateReplayPosition();
+  updateReplayTimeInfo();
+}
+
+function replayToggleAutoPlay() {
+  if (replayAutoInterval) {
+    clearInterval(replayAutoInterval);
+    replayAutoInterval = null;
+    document.getElementById('replay-play').innerHTML = '&#9654;';
+  } else {
+    document.getElementById('replay-play').innerHTML = '&#9646;&#9646;';
+    replayAutoInterval = setInterval(() => {
+      if (replayIdx >= replayMoves.length) {
+        clearInterval(replayAutoInterval);
+        replayAutoInterval = null;
+        document.getElementById('replay-play').innerHTML = '&#9654;';
+        return;
+      }
+      replayIdx++;
+      updateReplayPosition();
+      updateReplayTimeInfo();
+    }, 1200);
+  }
+}
+
+document.getElementById('replay-first').addEventListener('click', replayGoFirst);
+document.getElementById('replay-prev').addEventListener('click', replayGoPrev);
+document.getElementById('replay-play').addEventListener('click', replayToggleAutoPlay);
+document.getElementById('replay-next').addEventListener('click', replayGoNext);
+document.getElementById('replay-last').addEventListener('click', replayGoLast);
+
+document.getElementById('replay-back-btn').addEventListener('click', () => {
+  if (replayAutoInterval) { clearInterval(replayAutoInterval); replayAutoInterval = null; }
+  showLobby();
+});
+
+// --- Utility ---
+function formatDateTime(isoStr) {
+  const d = new Date(isoStr);
+  return d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function formatMoveTime(ms) {
+  if (ms < 1000) return `${ms}ms`;
+  const sec = (ms / 1000).toFixed(1);
+  return `${sec}s`;
+}
+
+function formatClockTime(ms) {
+  const totalSec = Math.ceil(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}:${sec.toString().padStart(2, '0')}`;
 }
 
 // --- Utility ---

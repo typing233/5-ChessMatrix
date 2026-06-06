@@ -90,7 +90,7 @@ class GameRoom {
         const gameOver = this.endGame('black', 'timeout');
         return { error: null, timeout: true, gameOver };
       }
-      if (this.moves.length > 1) this.whiteTime += this.increment;
+      this.whiteTime += this.increment;
     } else {
       this.blackTime -= elapsed;
       if (this.blackTime <= 0) {
@@ -98,7 +98,7 @@ class GameRoom {
         const gameOver = this.endGame('white', 'timeout');
         return { error: null, timeout: true, gameOver };
       }
-      if (this.moves.length > 1) this.blackTime += this.increment;
+      this.blackTime += this.increment;
     }
 
     this.lastMoveTimestamp = now;
@@ -107,7 +107,10 @@ class GameRoom {
       const move = this.chess.move({ from, to, promotion: promotion || 'q' });
       if (!move) return { error: 'Invalid move' };
 
-      this.moves.push({ from, to, promotion: move.promotion, san: move.san, fen: this.chess.fen() });
+      this.moves.push({
+        from, to, promotion: move.promotion, san: move.san, fen: this.chess.fen(),
+        elapsed, whiteTime: this.whiteTime, blackTime: this.blackTime, timestamp: now,
+      });
       this.drawOffer = null;
 
       games.update({ _id: this.id }, { $set: { moves: this.moves, fen: this.chess.fen(), pgn: this.chess.pgn() } });

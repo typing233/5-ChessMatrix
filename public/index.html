@@ -168,6 +168,60 @@
       </div>
     </div>
 
+    <!-- Replay Detail Screen -->
+    <div id="replay-screen" class="screen">
+      <header class="top-nav">
+        <div class="nav-brand">
+          <button id="replay-back-btn" class="btn-icon nav-back">&#8592;</button>
+          <span class="nav-title">对局详情</span>
+        </div>
+      </header>
+      <div class="replay-content">
+        <div class="replay-layout">
+          <div class="replay-board-area">
+            <div id="replay-board" class="chess-board-3d replay-board-size"></div>
+            <div class="replay-controls">
+              <button id="replay-first" class="btn-icon replay-ctrl-btn">&#9198;</button>
+              <button id="replay-prev" class="btn-icon replay-ctrl-btn">&#9664;</button>
+              <button id="replay-play" class="btn-icon replay-ctrl-btn">&#9654;</button>
+              <button id="replay-next" class="btn-icon replay-ctrl-btn">&#9654;</button>
+              <button id="replay-last" class="btn-icon replay-ctrl-btn">&#9197;</button>
+            </div>
+            <div class="replay-move-indicator" id="replay-move-indicator">0 / 0</div>
+          </div>
+          <div class="replay-info-panel">
+            <div class="replay-game-info card">
+              <h3>对局信息</h3>
+              <div class="replay-meta">
+                <div class="meta-row"><span class="meta-label">白方</span><span id="replay-white" class="meta-value"></span></div>
+                <div class="meta-row"><span class="meta-label">黑方</span><span id="replay-black" class="meta-value"></span></div>
+                <div class="meta-row"><span class="meta-label">结果</span><span id="replay-result" class="meta-value"></span></div>
+                <div class="meta-row"><span class="meta-label">原因</span><span id="replay-reason" class="meta-value"></span></div>
+                <div class="meta-row"><span class="meta-label">类型</span><span id="replay-type" class="meta-value"></span></div>
+                <div class="meta-row"><span class="meta-label">白方等级分</span><span id="replay-white-elo" class="meta-value"></span></div>
+                <div class="meta-row"><span class="meta-label">黑方等级分</span><span id="replay-black-elo" class="meta-value"></span></div>
+                <div class="meta-row"><span class="meta-label">开始时间</span><span id="replay-start-time" class="meta-value"></span></div>
+                <div class="meta-row"><span class="meta-label">结束时间</span><span id="replay-end-time" class="meta-value"></span></div>
+                <div class="meta-row"><span class="meta-label">总步数</span><span id="replay-total-moves" class="meta-value"></span></div>
+              </div>
+            </div>
+            <div class="replay-moves-panel card">
+              <h3>棋谱</h3>
+              <div id="replay-move-list" class="move-list replay-movelist"></div>
+            </div>
+            <div class="replay-time-panel card">
+              <h3>用时详情</h3>
+              <div class="replay-time-grid">
+                <div class="time-stat"><span class="meta-label">白方剩余</span><span id="replay-white-time-left" class="meta-value">--</span></div>
+                <div class="time-stat"><span class="meta-label">黑方剩余</span><span id="replay-black-time-left" class="meta-value">--</span></div>
+              </div>
+              <div id="replay-move-time" class="move-time-display"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Game Screen -->
     <div id="game-screen" class="screen">
       <div class="game-layout">
