@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChessMatrix - 多人国际象棋平台</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Auth Screen -->
+    <div id="auth-screen" class="screen active">
+      <div class="auth-container">
+        <h1>♔ ChessMatrix</h1>
+        <p class="subtitle">多人国际象棋对战平台</p>
+        <div class="auth-tabs">
+          <button class="tab active" data-tab="login">登录</button>
+          <button class="tab" data-tab="register">注册</button>
+        </div>
+        <form id="login-form" class="auth-form active">
+          <input type="text" id="login-username" placeholder="用户名" autocomplete="username" required>
+          <input type="password" id="login-password" placeholder="密码" autocomplete="current-password" required>
+          <button type="submit">登录</button>
+        </form>
+        <form id="register-form" class="auth-form">
+          <input type="text" id="register-username" placeholder="用户名 (3-20字符)" autocomplete="username" required>
+          <input type="password" id="register-password" placeholder="密码 (至少4位)" autocomplete="new-password" required>
+          <button type="submit">注册</button>
+        </form>
+        <div id="auth-error" class="error"></div>
+      </div>
+    </div>
+
+    <!-- Lobby Screen -->
+    <div id="lobby-screen" class="screen">
+      <header class="lobby-header">
+        <h1>♔ ChessMatrix</h1>
+        <div class="user-info">
+          <span id="user-display"></span>
+          <span id="user-elo" class="elo-badge"></span>
+          <button id="logout-btn" class="btn-small">退出</button>
+        </div>
+      </header>
+      <div class="lobby-content">
+        <div class="lobby-actions">
+          <div class="action-card">
+            <h3>快速匹配</h3>
+            <p>系统根据等级分自动匹配对手</p>
+            <button id="matchmaking-btn" class="btn-primary">开始匹配</button>
+            <div id="matchmaking-status" class="hidden">
+              <div class="spinner"></div>
+              <span>正在寻找对手...</span>
+              <button id="cancel-matchmaking-btn" class="btn-small">取消</button>
+            </div>
+          </div>
+          <div class="action-card">
+            <h3>创建房间</h3>
+            <p>创建私人房间邀请好友对战</p>
+            <button id="create-room-btn" class="btn-secondary">创建房间</button>
+            <div id="room-created" class="hidden">
+              <p>房间ID: <code id="room-id-display"></code></p>
+              <button id="copy-room-id" class="btn-small">复制</button>
+              <p class="hint">等待对手加入...</p>
+            </div>
+          </div>
+          <div class="action-card">
+            <h3>加入房间</h3>
+            <p>输入房间ID加入好友对局</p>
+            <div class="join-room-form">
+              <input type="text" id="join-room-input" placeholder="房间ID">
+              <button id="join-room-btn" class="btn-secondary">加入</button>
+            </div>
+          </div>
+        </div>
+        <div class="lobby-sidebar">
+          <div class="panel">
+            <h3>排行榜</h3>
+            <div id="leaderboard"></div>
+          </div>
+          <div class="panel">
+            <h3>对局历史</h3>
+            <div id="game-history"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="game-screen" class="screen">
+      <div class="game-layout">
+        <div class="game-info-panel">
+          <div class="player-card opponent">
+            <span class="player-name" id="opponent-name"></span>
+            <span class="player-elo" id="opponent-elo"></span>
+          </div>
+          <div id="game-status" class="game-status"></div>
+          <div class="player-card self">
+            <span class="player-name" id="self-name"></span>
+            <span class="player-elo" id="self-elo"></span>
+          </div>
+        </div>
+        <div class="board-container">
+          <div id="chess-board" class="chess-board"></div>
+          <div id="promotion-modal" class="modal hidden">
+            <div class="modal-content">
+              <h3>升变为</h3>
+              <div class="promotion-choices"></div>
+            </div>
+          </div>
+        </div>
+        <div class="game-controls-panel">
+          <div class="move-list-container">
+            <h3>走子记录</h3>
+            <div id="move-list" class="move-list"></div>
+          </div>
+          <div class="game-buttons">
+            <button id="resign-btn" class="btn-danger">认输</button>
+            <button id="draw-btn" class="btn-secondary">提和</button>
+            <button id="rematch-btn" class="btn-primary hidden">再来一局</button>
+            <button id="back-lobby-btn" class="btn-secondary hidden">返回大厅</button>
+          </div>
+        </div>
+      </div>
+      <div id="game-over-modal" class="modal hidden">
+        <div class="modal-content game-over-content">
+          <h2 id="game-over-title"></h2>
+          <p id="game-over-reason"></p>
+          <div id="game-over-elo" class="elo-change"></div>
+          <div class="game-over-buttons">
+            <button id="modal-rematch-btn" class="btn-primary">再来一局</button>
+            <button id="modal-lobby-btn" class="btn-secondary">返回大厅</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/chess-client.js"></script>
+  <script src="/js/board.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
