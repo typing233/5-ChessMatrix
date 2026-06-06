@@ -2,10 +2,11 @@ const ELO_RANGE_INITIAL = 100;
 const ELO_RANGE_INCREMENT = 50;
 const ELO_RANGE_MAX = 500;
 const EXPAND_INTERVAL_MS = 5000;
+const MATCH_TIMEOUT_MS = 60000;
 
 class MatchmakingQueue {
   constructor() {
-    this.queue = new Map(); // userId -> { userId, username, elo, joinedAt, range }
+    this.queue = new Map();
     this.expandTimer = null;
   }
 
@@ -29,6 +30,18 @@ class MatchmakingQueue {
 
   isInQueue(userId) {
     return this.queue.has(userId);
+  }
+
+  getPlayerStatus(userId) {
+    const player = this.queue.get(userId);
+    if (!player) return null;
+    const elapsed = Date.now() - player.joinedAt;
+    return {
+      elapsed,
+      range: player.range,
+      queueSize: this.queue.size,
+      timedOut: elapsed >= MATCH_TIMEOUT_MS,
+    };
   }
 
   findMatch() {
@@ -72,6 +85,17 @@ class MatchmakingQueue {
 
   getQueueSize() {
     return this.queue.size;
+  }
+
+  getTimedOutPlayers() {
+    const timedOut = [];
+    const now = Date.now();
+    for (const player of this.queue.values()) {
+      if (now - player.joinedAt >= MATCH_TIMEOUT_MS) {
+        timedOut.push(player.userId);
+      }
+    }
+    return timedOut;
   }
 }
 

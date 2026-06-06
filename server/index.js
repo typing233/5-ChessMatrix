@@ -46,10 +46,14 @@ app.get('/api/profile/:userId', async (req, res) => {
 
 app.get('/api/games/:userId', async (req, res) => {
   const userId = req.params.userId;
+  const page = parseInt(req.query.page) || 0;
+  const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+  const skip = page * limit;
+
   const userGames = await games.find({
     $or: [{ white_id: userId }, { black_id: userId }],
     result: { $ne: null }
-  }).sort({ ended_at: -1 }).limit(20);
+  }).sort({ ended_at: -1 }).skip(skip).limit(limit);
   res.json(userGames);
 });
 
@@ -66,7 +70,8 @@ app.get('/api/leaderboard', async (req, res) => {
 
 // --- Socket.IO ---
 
-const connectedUsers = new Map();
+const connectedUsers = new Map(); // socketId -> { userId, username, elo }
+const userSockets = new Map(); // userId -> socketId
 
 io.use(async (socket, next) => {
   const token = socket.handshake.auth.token;
@@ -90,14 +95,31 @@ io.on('connection', (socket) => {
     username: socket.username,
     elo: socket.userElo,
   });
+  userSockets.set(socket.userId, socket.id);
 
   socket.emit('connected', { userId: socket.userId, username: socket.username, elo: socket.userElo });
+
+  // Check for reconnect to active game
+  const existingRoom = roomManager.getRoomByPlayer(socket.userId);
+  if (existingRoom && existingRoom.status === 'playing') {
+    const reconnected = existingRoom.handleReconnect(socket.userId, socket.id);
+    if (reconnected) {
+      socket.join(existingRoom.id);
+      socket.emit('game_start', existingRoom.getState());
+      socket.emit('reconnected', { message: 'Reconnected to game' });
+
+      const opponentSocketId = socket.userId === existingRoom.white.userId
+        ? existingRoom.black.socketId
+        : existingRoom.white.socketId;
+      io.to(opponentSocketId).emit('opponent_reconnected');
+    }
+  }
 
   // --- Room Management ---
 
   socket.on('create_room', () => {
     const existing = roomManager.getRoomByPlayer(socket.userId);
-    if (existing) return socket.emit('error_msg', { message: 'Already in a game' });
+    if (existing && existing.status === 'playing') return socket.emit('error_msg', { message: 'Already in a game' });
 
     const roomId = uuidv4();
     socket.join(roomId);
@@ -132,6 +154,8 @@ io.on('connection', (socket) => {
     } else {
       room = await roomManager.createRoom(roomId, whitePlayer, blackPlayer, false);
     }
+
+    setupRoomCallbacks(room);
     io.to(roomId).emit('game_start', room.getState());
   });
 
@@ -139,7 +163,7 @@ io.on('connection', (socket) => {
 
   socket.on('join_matchmaking', async () => {
     const existing = roomManager.getRoomByPlayer(socket.userId);
-    if (existing) return socket.emit('error_msg', { message: 'Already in a game' });
+    if (existing && existing.status === 'playing') return socket.emit('error_msg', { message: 'Already in a game' });
 
     const user = await auth.getUserById(socket.userId);
     const added = matchmaking.addPlayer(socket.userId, socket.username, user.elo_rating);
@@ -162,6 +186,12 @@ io.on('connection', (socket) => {
 
     const result = room.makeMove(socket.userId, from, to, promotion);
     if (result.error) return socket.emit('error_msg', { message: result.error });
+
+    if (result.timeout) {
+      io.to(room.id).emit('game_over', result.gameOver);
+      io.to(room.id).emit('time_update', room.getTimeState());
+      return;
+    }
 
     const roomId = room.id;
     io.to(roomId).emit('move_made', {
@@ -249,6 +279,7 @@ io.on('connection', (socket) => {
       if (blackSocket) { blackSocket.leave(oldRoom.id); blackSocket.join(roomId); }
 
       const newRoom = await roomManager.createRoom(roomId, whitePlayer, blackPlayer, oldRoom.isRanked);
+      setupRoomCallbacks(newRoom);
       io.to(roomId).emit('game_start', newRoom.getState());
     } else {
       room.rematchRequest = socket.userId;
@@ -272,17 +303,31 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     connectedUsers.delete(socket.id);
+    userSockets.delete(socket.userId);
     matchmaking.removePlayer(socket.userId);
 
     const room = roomManager.getRoomByPlayer(socket.userId);
     if (room && room.status === 'playing') {
-      const result = room.resign(socket.userId);
-      if (result) {
-        io.to(room.id).emit('game_over', { ...result, reason: 'disconnect' });
-      }
+      room.handleDisconnect(socket.userId);
+
+      const opponentSocketId = socket.userId === room.white.userId
+        ? room.black.socketId
+        : room.white.socketId;
+      io.to(opponentSocketId).emit('opponent_disconnected', {
+        remaining: room.getDisconnectRemaining(),
+      });
     }
   });
 });
+
+function setupRoomCallbacks(room) {
+  room.onTimeout = (gameOver) => {
+    io.to(room.id).emit('game_over', gameOver);
+  };
+  room.onDisconnectExpire = (gameOver) => {
+    io.to(room.id).emit('game_over', { ...gameOver, reason: 'disconnect' });
+  };
+}
 
 function findSocketByPendingRoom(roomId) {
   for (const [, s] of io.sockets.sockets) {
@@ -292,17 +337,13 @@ function findSocketByPendingRoom(roomId) {
 }
 
 function getSocketIdForUser(userId) {
-  for (const [socketId, user] of connectedUsers) {
-    if (user.userId === userId) return socketId;
-  }
-  return null;
+  return userSockets.get(userId) || null;
 }
 
 function findSocketForUser(userId) {
-  for (const [, s] of io.sockets.sockets) {
-    if (s.userId === userId) return s;
-  }
-  return null;
+  const socketId = userSockets.get(userId);
+  if (!socketId) return null;
+  return io.sockets.sockets.get(socketId) || null;
 }
 
 async function tryMatch() {
@@ -342,10 +383,46 @@ async function tryMatch() {
   } else {
     room = await roomManager.createRoom(roomId, whitePlayer, blackPlayer, true);
   }
-  io.to(roomId).emit('game_start', room.getState());
+  setupRoomCallbacks(room);
+
+  io.to(roomId).emit('match_found', {
+    white: { username: room.white.username, elo: room.white.elo },
+    black: { username: room.black.username, elo: room.black.elo },
+  });
+
+  setTimeout(() => {
+    io.to(roomId).emit('game_start', room.getState());
+  }, 3000);
 }
 
-setInterval(tryMatch, 3000);
+// Matchmaking loop + status updates + time sync
+setInterval(async () => {
+  await tryMatch();
+
+  // Send matchmaking status to queued players
+  for (const [userId] of matchmaking.queue || new Map()) {
+    const status = matchmaking.getPlayerStatus(userId);
+    if (status) {
+      const socketId = getSocketIdForUser(userId);
+      if (socketId) {
+        io.to(socketId).emit('matchmaking_status', status);
+        if (status.timedOut) {
+          matchmaking.removePlayer(userId);
+          io.to(socketId).emit('matchmaking_timeout');
+        }
+      }
+    }
+  }
+}, 3000);
+
+// Time sync broadcast every second
+setInterval(() => {
+  for (const [roomId, room] of roomManager.rooms || new Map()) {
+    if (room.status === 'playing' && !room.disconnectedPlayer) {
+      io.to(roomId).emit('time_update', room.getTimeState());
+    }
+  }
+}, 1000);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {

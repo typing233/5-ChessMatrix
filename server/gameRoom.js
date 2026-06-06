@@ -3,6 +3,9 @@ const { games } = require('./database');
 const { calculateNewRatings } = require('./elo');
 const auth = require('./auth');
 
+const DEFAULT_TIME = 10 * 60 * 1000;
+const DEFAULT_INCREMENT = 5000;
+
 class GameRoom {
   constructor(id, whitePlayer, blackPlayer, isRanked = false) {
     this.id = id;
@@ -15,6 +18,59 @@ class GameRoom {
     this.drawOffer = null;
     this.rematchRequest = null;
     this.createdAt = Date.now();
+
+    this.whiteTime = DEFAULT_TIME;
+    this.blackTime = DEFAULT_TIME;
+    this.increment = DEFAULT_INCREMENT;
+    this.lastMoveTimestamp = Date.now();
+    this.timerInterval = null;
+
+    this.disconnectedPlayer = null;
+    this.disconnectTimer = null;
+    this.disconnectTimestamp = null;
+
+    this.onTimeout = null;
+    this.onDisconnectExpire = null;
+
+    this.startTimer();
+  }
+
+  startTimer() {
+    this.timerInterval = setInterval(() => {
+      if (this.status !== 'playing') return;
+      if (this.disconnectedPlayer) return;
+
+      const now = Date.now();
+      const elapsed = now - this.lastMoveTimestamp;
+      const isWhiteTurn = this.chess.turn() === 'w';
+
+      const remaining = isWhiteTurn
+        ? this.whiteTime - elapsed
+        : this.blackTime - elapsed;
+
+      if (remaining <= 0) {
+        if (isWhiteTurn) this.whiteTime = 0;
+        else this.blackTime = 0;
+        this.lastMoveTimestamp = now;
+
+        const loser = isWhiteTurn ? 'white' : 'black';
+        const result = loser === 'white' ? 'black' : 'white';
+        const gameOver = this.endGame(result, 'timeout');
+        if (this.onTimeout) this.onTimeout(gameOver);
+      }
+    }, 100);
+  }
+
+  getTimeState() {
+    const now = Date.now();
+    const elapsed = now - this.lastMoveTimestamp;
+    const isWhiteTurn = this.chess.turn() === 'w';
+
+    return {
+      whiteTime: isWhiteTurn ? Math.max(0, this.whiteTime - elapsed) : this.whiteTime,
+      blackTime: !isWhiteTurn ? Math.max(0, this.blackTime - elapsed) : this.blackTime,
+      activeSide: this.chess.turn(),
+    };
   }
 
   makeMove(userId, from, to, promotion) {
@@ -23,6 +79,29 @@ class GameRoom {
     const isWhiteTurn = this.chess.turn() === 'w';
     if (isWhiteTurn && userId !== this.white.userId) return { error: 'Not your turn' };
     if (!isWhiteTurn && userId !== this.black.userId) return { error: 'Not your turn' };
+
+    const now = Date.now();
+    const elapsed = now - this.lastMoveTimestamp;
+
+    if (isWhiteTurn) {
+      this.whiteTime -= elapsed;
+      if (this.whiteTime <= 0) {
+        this.whiteTime = 0;
+        const gameOver = this.endGame('black', 'timeout');
+        return { error: null, timeout: true, gameOver };
+      }
+      if (this.moves.length > 1) this.whiteTime += this.increment;
+    } else {
+      this.blackTime -= elapsed;
+      if (this.blackTime <= 0) {
+        this.blackTime = 0;
+        const gameOver = this.endGame('white', 'timeout');
+        return { error: null, timeout: true, gameOver };
+      }
+      if (this.moves.length > 1) this.blackTime += this.increment;
+    }
+
+    this.lastMoveTimestamp = now;
 
     try {
       const move = this.chess.move({ from, to, promotion: promotion || 'q' });
@@ -38,7 +117,7 @@ class GameRoom {
         gameOver = this.resolveGameOver();
       }
 
-      return { move, fen: this.chess.fen(), gameOver };
+      return { move, fen: this.chess.fen(), gameOver, timeState: this.getTimeState() };
     } catch (e) {
       return { error: 'Invalid move' };
     }
@@ -91,8 +170,50 @@ class GameRoom {
     return false;
   }
 
+  handleDisconnect(userId) {
+    this.disconnectedPlayer = userId;
+    this.disconnectTimestamp = Date.now();
+    this.disconnectTimer = setTimeout(() => {
+      if (this.status !== 'playing') return;
+      const result = userId === this.white.userId ? 'black' : 'white';
+      const gameOver = this.endGame(result, 'disconnect');
+      if (this.onDisconnectExpire) this.onDisconnectExpire(gameOver);
+    }, 60000);
+  }
+
+  handleReconnect(userId, newSocketId) {
+    if (this.disconnectedPlayer === userId) {
+      this.disconnectedPlayer = null;
+      this.disconnectTimestamp = null;
+      if (this.disconnectTimer) {
+        clearTimeout(this.disconnectTimer);
+        this.disconnectTimer = null;
+      }
+      if (userId === this.white.userId) {
+        this.white.socketId = newSocketId;
+      } else {
+        this.black.socketId = newSocketId;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  getDisconnectRemaining() {
+    if (!this.disconnectTimestamp) return null;
+    return Math.max(0, 60000 - (Date.now() - this.disconnectTimestamp));
+  }
+
   endGame(result, reason) {
     this.status = 'ended';
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+      this.timerInterval = null;
+    }
+    if (this.disconnectTimer) {
+      clearTimeout(this.disconnectTimer);
+      this.disconnectTimer = null;
+    }
 
     let whiteEloAfter = this.white.elo;
     let blackEloAfter = this.black.elo;
@@ -132,6 +253,7 @@ class GameRoom {
   }
 
   getState() {
+    const timeState = this.getTimeState();
     return {
       id: this.id,
       fen: this.chess.fen(),
@@ -145,6 +267,11 @@ class GameRoom {
       isRanked: this.isRanked,
       drawOffer: this.drawOffer,
       legalMoves: this.getLegalMoves(),
+      whiteTime: timeState.whiteTime,
+      blackTime: timeState.blackTime,
+      activeSide: timeState.activeSide,
+      disconnectedPlayer: this.disconnectedPlayer,
+      disconnectRemaining: this.getDisconnectRemaining(),
     };
   }
 
@@ -203,6 +330,8 @@ class RoomManager {
   removeRoom(roomId) {
     const room = this.rooms.get(roomId);
     if (room) {
+      if (room.timerInterval) clearInterval(room.timerInterval);
+      if (room.disconnectTimer) clearTimeout(room.disconnectTimer);
       this.playerRooms.delete(room.white.userId);
       this.playerRooms.delete(room.black.userId);
       this.rooms.delete(roomId);
