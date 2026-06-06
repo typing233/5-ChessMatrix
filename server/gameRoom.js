@@ -1,5 +1,4 @@
 const { Chess } = require('chess.js');
-const { v4: uuidv4 } = require('uuid');
 const { games } = require('./database');
 const { calculateNewRatings } = require('./elo');
 const auth = require('./auth');
@@ -166,8 +165,7 @@ class RoomManager {
     this.playerRooms = new Map();
   }
 
-  async createRoom(whitePlayer, blackPlayer, isRanked = false) {
-    const id = uuidv4();
+  async createRoom(id, whitePlayer, blackPlayer, isRanked = false) {
     const room = new GameRoom(id, whitePlayer, blackPlayer, isRanked);
     this.rooms.set(id, room);
     this.playerRooms.set(whitePlayer.userId, id);

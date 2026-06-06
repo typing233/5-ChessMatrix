@@ -77,6 +77,7 @@ document.getElementById('register-form').addEventListener('submit', async (e) =>
 
 function handleAuthSuccess(data) {
   currentUser = data.user;
+  currentUser.userId = currentUser._id;
   token = data.token;
   localStorage.setItem('chess_token', token);
   localStorage.setItem('chess_user', JSON.stringify(currentUser));
@@ -100,6 +101,7 @@ document.getElementById('logout-btn').addEventListener('click', () => {
   if (savedToken && savedUser) {
     token = savedToken;
     currentUser = JSON.parse(savedUser);
+    currentUser.userId = currentUser.userId || currentUser._id;
     connectSocket();
     showLobby();
   }
@@ -211,7 +213,7 @@ async function loadLeaderboard() {
 async function loadGameHistory() {
   if (!currentUser) return;
   try {
-    const res = await fetch(`/api/games/${currentUser.userId || currentUser.id}`);
+    const res = await fetch(`/api/games/${currentUser.userId || currentUser._id}`);
     const games = await res.json();
     const el = document.getElementById('game-history');
     if (games.length === 0) {
@@ -219,7 +221,7 @@ async function loadGameHistory() {
       return;
     }
     el.innerHTML = games.slice(0, 10).map(g => {
-      const isWhite = g.white_id === (currentUser.userId || currentUser.id);
+      const isWhite = g.white_id === (currentUser.userId || currentUser._id);
       const opponent = isWhite ? g.black_username : g.white_username;
       let resultClass, resultText;
       if (g.result === 'draw') { resultClass = 'result-draw'; resultText = '和'; }
@@ -231,7 +233,7 @@ async function loadGameHistory() {
       return `
         <div class="history-entry">
           <span><span class="${resultClass}">[${resultText}]</span> vs ${opponent}</span>
-          <button class="replay-btn" onclick="viewReplay('${g.id}')">回放</button>
+          <button class="replay-btn" onclick="viewReplay('${g._id}')">回放</button>
         </div>
       `;
     }).join('');
@@ -267,7 +269,7 @@ function startGame(state) {
   currentGame = state;
   showScreen('game');
 
-  const myUserId = currentUser.userId || currentUser.id;
+  const myUserId = currentUser.userId || currentUser._id;
   const isWhite = state.white.userId === myUserId;
   const myColor = isWhite ? 'w' : 'b';
 
@@ -312,7 +314,7 @@ function startGame(state) {
 
 function updateGameState(state) {
   currentGame = state;
-  const myUserId = currentUser.userId || currentUser.id;
+  const myUserId = currentUser.userId || currentUser._id;
   const myColor = state.white.userId === myUserId ? 'w' : 'b';
 
   board.setPosition(state.fen);
@@ -365,7 +367,7 @@ function handleGameOver(result) {
   board.selectedSquare = null;
   board.render();
 
-  const myUserId = currentUser.userId || currentUser.id;
+  const myUserId = currentUser.userId || currentUser._id;
   const isWhite = currentGame.white.userId === myUserId;
 
   let title, reason;

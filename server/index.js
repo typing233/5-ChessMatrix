@@ -128,9 +128,9 @@ io.on('connection', (socket) => {
 
     let room;
     if (Math.random() < 0.5) {
-      room = await roomManager.createRoom(blackPlayer, whitePlayer, false);
+      room = await roomManager.createRoom(roomId, blackPlayer, whitePlayer, false);
     } else {
-      room = await roomManager.createRoom(whitePlayer, blackPlayer, false);
+      room = await roomManager.createRoom(roomId, whitePlayer, blackPlayer, false);
     }
     io.to(roomId).emit('game_start', room.getState());
   });
@@ -248,7 +248,7 @@ io.on('connection', (socket) => {
       if (whiteSocket) { whiteSocket.leave(oldRoom.id); whiteSocket.join(roomId); }
       if (blackSocket) { blackSocket.leave(oldRoom.id); blackSocket.join(roomId); }
 
-      const newRoom = await roomManager.createRoom(whitePlayer, blackPlayer, oldRoom.isRanked);
+      const newRoom = await roomManager.createRoom(roomId, whitePlayer, blackPlayer, oldRoom.isRanked);
       io.to(roomId).emit('game_start', newRoom.getState());
     } else {
       room.rematchRequest = socket.userId;
@@ -338,9 +338,9 @@ async function tryMatch() {
 
   let room;
   if (Math.random() < 0.5) {
-    room = await roomManager.createRoom(blackPlayer, whitePlayer, true);
+    room = await roomManager.createRoom(roomId, blackPlayer, whitePlayer, true);
   } else {
-    room = await roomManager.createRoom(whitePlayer, blackPlayer, true);
+    room = await roomManager.createRoom(roomId, whitePlayer, blackPlayer, true);
   }
   io.to(roomId).emit('game_start', room.getState());
 }
