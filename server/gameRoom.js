@@ -83,47 +83,49 @@ class GameRoom {
     const now = Date.now();
     const elapsed = now - this.lastMoveTimestamp;
 
-    if (isWhiteTurn) {
-      this.whiteTime -= elapsed;
-      if (this.whiteTime <= 0) {
-        this.whiteTime = 0;
-        const gameOver = this.endGame('black', 'timeout');
-        return { error: null, timeout: true, gameOver };
-      }
-      this.whiteTime += this.increment;
-    } else {
-      this.blackTime -= elapsed;
-      if (this.blackTime <= 0) {
-        this.blackTime = 0;
-        const gameOver = this.endGame('white', 'timeout');
-        return { error: null, timeout: true, gameOver };
-      }
-      this.blackTime += this.increment;
+    // Check timeout before attempting the move, but don't modify clocks yet
+    const remaining = isWhiteTurn ? this.whiteTime - elapsed : this.blackTime - elapsed;
+    if (remaining <= 0) {
+      if (isWhiteTurn) this.whiteTime = 0;
+      else this.blackTime = 0;
+      const winner = isWhiteTurn ? 'black' : 'white';
+      const gameOver = this.endGame(winner, 'timeout');
+      return { error: null, timeout: true, gameOver };
     }
 
-    this.lastMoveTimestamp = now;
-
+    // Validate the move FIRST
+    let move;
     try {
-      const move = this.chess.move({ from, to, promotion: promotion || 'q' });
+      move = this.chess.move({ from, to, promotion: promotion || 'q' });
       if (!move) return { error: 'Invalid move' };
-
-      this.moves.push({
-        from, to, promotion: move.promotion, san: move.san, fen: this.chess.fen(),
-        elapsed, whiteTime: this.whiteTime, blackTime: this.blackTime, timestamp: now,
-      });
-      this.drawOffer = null;
-
-      games.update({ _id: this.id }, { $set: { moves: this.moves, fen: this.chess.fen(), pgn: this.chess.pgn() } });
-
-      let gameOver = null;
-      if (this.chess.isGameOver()) {
-        gameOver = this.resolveGameOver();
-      }
-
-      return { move, fen: this.chess.fen(), gameOver, timeState: this.getTimeState() };
     } catch (e) {
       return { error: 'Invalid move' };
     }
+
+    // Move is legal — now deduct time and add increment
+    if (isWhiteTurn) {
+      this.whiteTime -= elapsed;
+      this.whiteTime += this.increment;
+    } else {
+      this.blackTime -= elapsed;
+      this.blackTime += this.increment;
+    }
+    this.lastMoveTimestamp = now;
+
+    this.moves.push({
+      from, to, promotion: move.promotion, san: move.san, fen: this.chess.fen(),
+      elapsed, whiteTime: this.whiteTime, blackTime: this.blackTime, timestamp: now,
+    });
+    this.drawOffer = null;
+
+    games.update({ _id: this.id }, { $set: { moves: this.moves, fen: this.chess.fen(), pgn: this.chess.pgn() } });
+
+    let gameOver = null;
+    if (this.chess.isGameOver()) {
+      gameOver = this.resolveGameOver();
+    }
+
+    return { move, fen: this.chess.fen(), gameOver, timeState: this.getTimeState() };
   }
 
   resolveGameOver() {
